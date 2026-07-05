@@ -32,7 +32,7 @@ final class AgentAuthenticator
         $token = substr($authorization, 7);
 
         try {
-            $claims = (array) JWT::decode($token, new Key(config('app.key'), 'HS256'));
+            $claims = (array) JWT::decode($token, new Key((string) config('app.key'), 'HS256'));
         } catch (\Throwable) {
             abort(401, 'Invalid agent token.');
         }
@@ -62,7 +62,7 @@ final class AgentAuthenticator
             'nbf' => $now,
             'exp' => $now + ($ttlMinutes * 60),
             'jti' => (string) Str::uuid(),
-        ], config('app.key'), 'HS256');
+        ], (string) config('app.key'), 'HS256');
 
         DB::table('agent_tokens')->insert([
             'id' => (string) Str::uuid(),
@@ -76,4 +76,3 @@ final class AgentAuthenticator
         return ['token' => $token, 'expires_at' => now()->addMinutes($ttlMinutes)->toISOString()];
     }
 }
-

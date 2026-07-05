@@ -12,6 +12,7 @@ AGENT_BIN="${CONTROLPANEL_AGENT_BIN:-/usr/local/bin/controlpanel-agent}"
 AGENT_CONFIG_DIR="${CONTROLPANEL_AGENT_CONFIG_DIR:-/etc/controlpanel}"
 YES="${CONTROLPANEL_YES:-false}"
 GUIDED="${CONTROLPANEL_GUIDED:-false}"
+FREE_PORTS="${CONTROLPANEL_FREE_PORTS:-true}"
 
 log() {
   printf '[controlpanel:uninstall] %s\n' "$*"
@@ -38,6 +39,7 @@ Options:
   --remove-env            Delete the env file
   --remove-agent          Remove the node agent binary and systemd service
   --remove-agent-config   Also delete /etc/controlpanel or configured agent dir
+  --no-free-ports         Do not remove leftover ControlPanel Docker containers on configured ports
   -y, --yes               Do not prompt before uninstalling
   -h, --help              Show this help
 
@@ -48,6 +50,7 @@ Environment variables:
   CONTROLPANEL_REMOVE_ENV=true
   CONTROLPANEL_REMOVE_AGENT=true
   CONTROLPANEL_REMOVE_AGENT_CONFIG=true
+  CONTROLPANEL_FREE_PORTS=false
 USAGE
 }
 
@@ -87,6 +90,10 @@ parse_args() {
       --remove-agent-config)
         REMOVE_AGENT="true"
         CONTROLPANEL_REMOVE_AGENT_CONFIG="true"
+        shift
+        ;;
+      --no-free-ports)
+        FREE_PORTS="false"
         shift
         ;;
       -y|--yes)
@@ -206,6 +213,56 @@ docker_compose() {
   fi
 }
 
+env_value() {
+  local key="$1"
+  [[ -f "$ENV_FILE" ]] || return 0
+  sed -nE "s#^${key}=(.*)#\\1#p" "$ENV_FILE" | tail -n 1
+}
+
+container_ids_for_port() {
+  local port="$1"
+  docker ps -a --format '{{.ID}} {{.Ports}}' \
+    | awk -v port="$port" '$0 ~ "(0\\.0\\.0\\.0|127\\.0\\.0\\.1|::):" port "->" {print $1}'
+}
+
+is_controlpanel_container() {
+  local id="$1"
+  local labels name image
+  labels="$(docker inspect -f '{{json .Config.Labels}}' "$id" 2>/dev/null || true)"
+  name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##' || true)"
+  image="$(docker inspect -f '{{.Config.Image}}' "$id" 2>/dev/null || true)"
+
+  [[ "$labels" == *'com.docker.compose.project'* ]] || return 1
+  [[ "$labels$name$image" == *controlpanel* || "$labels$name$image" == *panel* ]]
+}
+
+free_leftover_port_containers() {
+  [[ "$FREE_PORTS" == "true" ]] || return 0
+
+  local ports port id
+  ports="$(
+    printf '%s\n' \
+      "$(env_value WEB_PORT)" \
+      "$(env_value API_PORT)" \
+      "$(env_value POSTGRES_PORT)" \
+      "$(env_value REDIS_PORT)" \
+      "$(env_value POWERDNS_API_PORT)" \
+      3000 3001 8080 5432 6379 8082 \
+      | awk 'NF && !seen[$0]++'
+  )"
+
+  while IFS= read -r port; do
+    [[ -n "$port" ]] || continue
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      if is_controlpanel_container "$id"; then
+        log "Removing leftover ControlPanel Docker container $id on port $port"
+        docker rm -f "$id" >/dev/null 2>&1 || true
+      fi
+    done < <(container_ids_for_port "$port")
+  done <<<"$ports"
+}
+
 confirm_data_removal() {
   [[ "$REMOVE_DATA" == "true" ]] || return 0
 
@@ -257,6 +314,8 @@ main() {
     log "Stopping services and keeping Docker volumes"
     docker_compose --env-file "$ENV_FILE" down --remove-orphans
   fi
+
+  free_leftover_port_containers
 
   remove_agent_service
 

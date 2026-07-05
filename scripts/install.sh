@@ -13,6 +13,7 @@ YES="${CONTROLPANEL_YES:-false}"
 SKIP_START="${CONTROLPANEL_SKIP_START:-false}"
 GUIDED="${CONTROLPANEL_GUIDED:-false}"
 OVERWRITE_ENV="${CONTROLPANEL_OVERWRITE_ENV:-false}"
+FREE_STALE_PORTS="${CONTROLPANEL_FREE_STALE_PORTS:-true}"
 APP_URL="${CONTROLPANEL_APP_URL:-http://localhost:8080}"
 WEB_PORT="${CONTROLPANEL_WEB_PORT:-3000}"
 API_PORT="${CONTROLPANEL_API_PORT:-8080}"
@@ -54,6 +55,7 @@ Options:
   --ssl-email EMAIL     Let's Encrypt account email
   --ssl-domain DOMAIN   Override domain derived from APP_URL
   --skip-start          Generate files but do not start Docker services
+  --no-free-ports       Do not remove stale Docker containers occupying selected ports
   -y, --yes             Do not prompt before starting installation
   -h, --help            Show this help
 
@@ -72,6 +74,7 @@ Environment variables:
   CONTROLPANEL_AGENT_CONFIG_DIR
   CONTROLPANEL_AGENT_TEMPLATE_DIR
   CONTROLPANEL_SKIP_START=true
+  CONTROLPANEL_FREE_STALE_PORTS=false
   CONTROLPANEL_YES=true
 USAGE
 }
@@ -113,6 +116,10 @@ parse_args() {
         ;;
       --skip-start)
         SKIP_START="true"
+        shift
+        ;;
+      --no-free-ports)
+        FREE_STALE_PORTS="false"
         shift
         ;;
       -y|--yes)
@@ -278,6 +285,53 @@ docker_compose() {
   else
     fail "Docker Compose is required."
   fi
+}
+
+container_ids_for_port() {
+  local port="$1"
+  docker ps -a --format '{{.ID}} {{.Ports}}' \
+    | awk -v port="$port" '$0 ~ "(0\\.0\\.0\\.0|127\\.0\\.0\\.1|::):" port "->" {print $1}'
+}
+
+is_controlpanel_container() {
+  local id="$1"
+  local labels name image
+  labels="$(docker inspect -f '{{json .Config.Labels}}' "$id" 2>/dev/null || true)"
+  name="$(docker inspect -f '{{.Name}}' "$id" 2>/dev/null | sed 's#^/##' || true)"
+  image="$(docker inspect -f '{{.Config.Image}}' "$id" 2>/dev/null || true)"
+
+  [[ "$labels" == *'com.docker.compose.project'* ]] || return 1
+  [[ "$labels$name$image" == *controlpanel* || "$labels$name$image" == *panel* ]]
+}
+
+free_stale_port_containers() {
+  [[ "$FREE_STALE_PORTS" == "true" ]] || return 0
+
+  local port id
+  for port in "$WEB_PORT" "$API_PORT" "$POSTGRES_PORT" "$REDIS_PORT" "$POWERDNS_API_PORT"; do
+    [[ -n "$port" ]] || continue
+    while IFS= read -r id; do
+      [[ -n "$id" ]] || continue
+      if is_controlpanel_container "$id"; then
+        log "Removing stale ControlPanel Docker container $id on port $port"
+        docker rm -f "$id" >/dev/null 2>&1 || true
+      fi
+    done < <(container_ids_for_port "$port")
+  done
+}
+
+assert_ports_available() {
+  local port ids
+  for port in "$WEB_PORT" "$API_PORT" "$POSTGRES_PORT" "$REDIS_PORT" "$POWERDNS_API_PORT"; do
+    [[ -n "$port" ]] || continue
+    ids="$(container_ids_for_port "$port" | tr '\n' ' ')"
+    if [[ -n "$ids" ]]; then
+      fail "Port $port is still used by Docker container(s): $ids. Run scripts/uninstall.sh --project $PROJECT_NAME --yes or rerun install with stale port cleanup enabled."
+    fi
+    if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$port )" | tail -n +2 | grep -q .; then
+      fail "Port $port is already in use by a host process. Stop that process or choose another port."
+    fi
+  done
 }
 
 confirm_install() {
@@ -522,6 +576,8 @@ main() {
   if [[ "$SKIP_START" == "true" ]]; then
     log "Skipping Docker service start"
   else
+    free_stale_port_containers
+    assert_ports_available
     log "Building and starting services"
     docker_compose --env-file "$ENV_FILE" up -d --build
   fi
