@@ -1,0 +1,11 @@
+myhostname = {{ mail_hostname }}
+mydestination = localhost
+virtual_mailbox_domains = pgsql:/etc/postfix/controlpanel-domains.cf
+virtual_mailbox_maps = pgsql:/etc/postfix/controlpanel-mailboxes.cf
+virtual_alias_maps = pgsql:/etc/postfix/controlpanel-aliases.cf
+smtpd_tls_security_level = may
+smtpd_sasl_type = dovecot
+smtpd_sasl_path = private/auth
+smtpd_sasl_auth_enable = yes
+smtpd_recipient_restrictions = permit_sasl_authenticated, reject_unauth_destination
+

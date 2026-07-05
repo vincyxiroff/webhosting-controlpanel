@@ -1,0 +1,22 @@
+#!/usr/bin/env php
+<?php
+
+$commands = [
+    'node:register TOKEN' => 'Register this server as a data-plane node.',
+    'node:drain NODE_ID' => 'Drain a node before maintenance.',
+    'site:create DOMAIN --runtime=RUNTIME --plan=PLAN_ID' => 'Create and schedule a site.',
+    'site:migrate SITE_ID --target=NODE_ID' => 'Migrate a site.',
+    'backup:restore BACKUP_ID --site=SITE_ID' => 'Restore a backup.',
+    'billing:sync TENANT_ID' => 'Sync FOSSBilling usage.',
+];
+
+if (($argv[1] ?? '') === 'list') {
+    foreach ($commands as $signature => $description) {
+        echo str_pad($signature, 56) . $description . PHP_EOL;
+    }
+    exit(0);
+}
+
+fwrite(STDERR, "ControlPanel CLI foundation. Run: controlpanel list\n");
+exit(1);
+

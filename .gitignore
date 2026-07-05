@@ -1,0 +1,17 @@
+node_modules/
+vendor/
+.next/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+*.tsbuildinfo
+*.pem
+*.key
+*.crt
+storage/
+bootstrap/cache/
+tmp/

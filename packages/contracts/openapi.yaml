@@ -1,0 +1,427 @@
+openapi: 3.1.0
+info:
+  title: ControlPanel OS API
+  version: 0.1.0
+  description: API-first hosting control plane contract.
+servers:
+  - url: https://api.controlpanel.local/v1
+security:
+  - bearerAuth: []
+paths:
+  /agent/v1/register:
+    post:
+      tags: [Agent]
+      summary: Register a node agent using a one-time registration token.
+      security: []
+      responses:
+        '201':
+          description: Node registered and agent token issued
+  /agent/v1/heartbeat:
+    post:
+      tags: [Agent]
+      summary: Report node metrics, health, containers, active sites, and capabilities.
+      responses:
+        '200':
+          description: Heartbeat accepted
+  /agent/v1/command/pull:
+    post:
+      tags: [Agent]
+      summary: Pull reliable commands assigned to the authenticated node.
+      responses:
+        '200':
+          description: Command batch
+  /agent/v1/command/{commandId}/result:
+    post:
+      tags: [Agent]
+      summary: Report command lifecycle state.
+      parameters:
+        - name: commandId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Result accepted
+  /agent/v1/site/create:
+    post:
+      tags: [Agent]
+      summary: Capability endpoint for site creation. Reliable execution uses command pull.
+      responses:
+        '200':
+          description: Supported
+  /agent/v1/site/delete:
+    post:
+      tags: [Agent]
+      summary: Capability endpoint for site deletion. Reliable execution uses command pull.
+      responses:
+        '200':
+          description: Supported
+  /agent/v1/site/suspend:
+    post:
+      tags: [Agent]
+      summary: Capability endpoint for site suspension. Reliable execution uses command pull.
+      responses:
+        '200':
+          description: Supported
+  /agent/v1/site/restore:
+    post:
+      tags: [Agent]
+      summary: Capability endpoint for site restore. Reliable execution uses command pull.
+      responses:
+        '200':
+          description: Supported
+  /agent/v1/runtime/provision:
+    post:
+      tags: [Agent]
+      summary: Capability endpoint for runtime provisioning. Reliable execution uses command pull.
+      responses:
+        '200':
+          description: Supported
+  /agent/v1/runtime/destroy:
+    post:
+      tags: [Agent]
+      summary: Capability endpoint for runtime destroy. Reliable execution uses command pull.
+      responses:
+        '200':
+          description: Supported
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Create a session and short-lived access token.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthSession'
+  /tenants:
+    get:
+      tags: [Tenancy]
+      summary: List tenants visible to the actor.
+      responses:
+        '200':
+          description: Tenant list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Tenant'
+    post:
+      tags: [Tenancy]
+      summary: Create a tenant.
+      responses:
+        '201':
+          description: Created
+  /plans:
+    get:
+      tags: [Plans]
+      summary: List hosting plans.
+      responses:
+        '200':
+          description: Plan list
+    post:
+      tags: [Plans]
+      summary: Create or publish a hosting plan.
+      responses:
+        '201':
+          description: Created
+  /nodes:
+    get:
+      tags: [Nodes]
+      summary: List nodes with live health.
+      responses:
+        '200':
+          description: Node list
+    post:
+      tags: [Nodes]
+      summary: Create a node registration token.
+      responses:
+        '201':
+          description: Registration token
+  /nodes/{nodeId}/drain:
+    post:
+      tags: [Nodes]
+      summary: Put a node into maintenance and stop new placement.
+      parameters:
+        - $ref: '#/components/parameters/nodeId'
+      responses:
+        '202':
+          description: Drain started
+  /sites:
+    get:
+      tags: [Sites]
+      summary: List sites visible to the actor.
+      responses:
+        '200':
+          description: Site list
+    post:
+      tags: [Sites]
+      summary: Create and schedule a site.
+      responses:
+        '202':
+          description: Site provisioning accepted
+  /sites/{siteId}/deployments:
+    post:
+      tags: [Deployments]
+      summary: Start a deployment.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Deployment accepted
+  /sites/{siteId}/suspend:
+    post:
+      tags: [Sites]
+      summary: Suspend a site by stopping workload execution and blocking traffic.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Suspension queued
+  /sites/{siteId}/restore:
+    post:
+      tags: [Sites]
+      summary: Restore a suspended site and re-enable routing.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Restore queued
+  /sites/{siteId}/vhost/preview:
+    post:
+      tags: [NGINX]
+      summary: Validate an NGINX VHost revision.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '200':
+          description: Validation result
+  /sites/{siteId}/ssl/orders:
+    post:
+      tags: [SSL]
+      summary: Request or renew a certificate.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Certificate order accepted
+  /dns/zones:
+    get:
+      tags: [DNS]
+      summary: List DNS zones.
+      responses:
+        '200':
+          description: Zone list
+  /mail/domains/{domainId}/mailboxes:
+    get:
+      tags: [Email]
+      summary: List mailboxes for a domain.
+      parameters:
+        - name: domainId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Mailbox list
+  /billing/fossbilling/webhook:
+    post:
+      tags: [Billing]
+      summary: Receive FOSSBilling lifecycle hooks.
+      security: []
+      responses:
+        '202':
+          description: Accepted
+  /billing/usage/aggregate:
+    post:
+      tags: [Billing]
+      summary: Aggregate raw usage samples into a billing window.
+      responses:
+        '200':
+          description: Aggregated
+  /billing/enforce:
+    post:
+      tags: [Billing]
+      summary: Evaluate tenant usage against plan limits and queue enforcement commands.
+      responses:
+        '202':
+          description: Enforcement pass complete
+  /billing/events/process:
+    post:
+      tags: [Billing]
+      summary: Process queued FOSSBilling events in tenant order.
+      responses:
+        '202':
+          description: Events processed
+  /billing/enforcement-decisions:
+    get:
+      tags: [Billing]
+      summary: List recent billing enforcement decisions.
+      responses:
+        '200':
+          description: Decision list
+  /scheduler/placement-decisions:
+    get:
+      tags: [Scheduler]
+      summary: List recent placement decisions and rejection reasons.
+      responses:
+        '200':
+          description: Placement decision list
+  /metering/samples:
+    post:
+      tags: [Metering]
+      summary: Record a raw per-site usage sample.
+      responses:
+        '202':
+          description: Recorded
+  /metering/aggregate:
+    post:
+      tags: [Metering]
+      summary: Aggregate raw samples into 1m, 5m, or 1h buckets.
+      responses:
+        '200':
+          description: Aggregated
+  /sites/{siteId}/enforcement/evaluate:
+    post:
+      tags: [Billing]
+      summary: Evaluate quota enforcement and queue throttle or suspend actions.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Evaluated
+  /ha/failover/detect:
+    post:
+      tags: [HighAvailability]
+      summary: Detect stale node heartbeats and open failover incidents.
+      responses:
+        '202':
+          description: Detection complete
+  /ha/sites/{siteId}/recover:
+    post:
+      tags: [HighAvailability]
+      summary: Plan recovery of a site onto another node.
+      parameters:
+        - $ref: '#/components/parameters/siteId'
+      responses:
+        '202':
+          description: Recovery queued
+  /storage/policies:
+    post:
+      tags: [Storage]
+      summary: Create a storage replication policy.
+      responses:
+        '201':
+          description: Created
+  /storage/snapshots:
+    post:
+      tags: [Storage]
+      summary: Queue a snapshot and replication job.
+      responses:
+        '202':
+          description: Queued
+  /edge/routes:
+    post:
+      tags: [Edge]
+      summary: Publish a site route to the edge layer.
+      responses:
+        '202':
+          description: Publishing
+  /edge/reroute:
+    post:
+      tags: [Edge]
+      summary: Reroute a site to a different origin node.
+      responses:
+        '202':
+          description: Publishing
+  /security/score:
+    post:
+      tags: [Security]
+      summary: Score a request using WAF, reputation, rate, and bot signals.
+      responses:
+        '200':
+          description: Security decision
+  /consistency/run:
+    post:
+      tags: [Consistency]
+      summary: Run one global desired/actual reconciliation pass.
+      responses:
+        '202':
+          description: Reconciliation pass completed
+  /consistency/drifts:
+    get:
+      tags: [Consistency]
+      summary: List recent drift records.
+      responses:
+        '200':
+          description: Drift list
+  /consistency/jobs:
+    get:
+      tags: [Consistency]
+      summary: List recent reconciliation jobs.
+      responses:
+        '200':
+          description: Reconciliation job list
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    nodeId:
+      name: nodeId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    siteId:
+      name: siteId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 12 }
+        totp: { type: string }
+    AuthSession:
+      type: object
+      required: [accessToken, expiresAt, user]
+      properties:
+        accessToken: { type: string }
+        expiresAt: { type: string, format: date-time }
+        user:
+          $ref: '#/components/schemas/User'
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        tenantId: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role:
+          type: string
+          enum: [super_admin, admin, reseller, customer, support, readonly]
+    Tenant:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        parentId: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        type:
+          type: string
+          enum: [provider, reseller, agency, saas, customer]
+        status:
+          type: string
+          enum: [active, suspended, terminating]

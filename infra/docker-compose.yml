@@ -1,0 +1,98 @@
+services:
+  api:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      APP_KEY: ${APP_KEY:-base64:replace-me}
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${DB_DATABASE:-controlpanel}
+      DB_USERNAME: ${DB_USERNAME:-controlpanel}
+      DB_PASSWORD: ${DB_PASSWORD:-controlpanel}
+      REDIS_HOST: redis
+      QUEUE_CONNECTION: redis
+      BROADCAST_CONNECTION: reverb
+      FOSSBILLING_WEBHOOK_SECRET: ${FOSSBILLING_WEBHOOK_SECRET:-local-fossbilling-secret}
+    ports:
+      - "${API_PORT:-8080}:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8080/v1}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-ws://localhost:8081}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      - api
+
+  worker:
+    build:
+      context: ../apps/api
+      dockerfile: Dockerfile
+    command: php artisan queue:work redis --sleep=1 --tries=3 --timeout=300
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      APP_KEY: ${APP_KEY:-base64:replace-me}
+      APP_URL: ${APP_URL:-http://localhost:8080}
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_DATABASE: ${DB_DATABASE:-controlpanel}
+      DB_USERNAME: ${DB_USERNAME:-controlpanel}
+      DB_PASSWORD: ${DB_PASSWORD:-controlpanel}
+      REDIS_HOST: redis
+      QUEUE_CONNECTION: redis
+      FOSSBILLING_WEBHOOK_SECRET: ${FOSSBILLING_WEBHOOK_SECRET:-local-fossbilling-secret}
+    depends_on:
+      - api
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-controlpanel}
+      POSTGRES_USER: ${POSTGRES_USER:-controlpanel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-controlpanel}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+
+  powerdns:
+    image: powerdns/pdns-auth-48:latest
+    environment:
+      PDNS_AUTH_AUTH: "yes"
+      PDNS_AUTH_API: "yes"
+      PDNS_AUTH_API_KEY: ${PDNS_AUTH_API_KEY:-local-powerdns-key}
+      PDNS_AUTH_LAUNCH: gpgsql
+      PDNS_AUTH_GPGSQL_HOST: postgres
+      PDNS_AUTH_GPGSQL_DBNAME: ${POSTGRES_DB:-controlpanel}
+      PDNS_AUTH_GPGSQL_USER: ${POSTGRES_USER:-controlpanel}
+      PDNS_AUTH_GPGSQL_PASSWORD: ${POSTGRES_PASSWORD:-controlpanel}
+    ports:
+      - "${POWERDNS_DNS_PORT:-5300}:53/udp"
+      - "${POWERDNS_API_PORT:-8082}:8081"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres-data:
+  redis-data:

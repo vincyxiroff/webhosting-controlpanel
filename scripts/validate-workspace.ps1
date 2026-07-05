@@ -1,0 +1,70 @@
+$ErrorActionPreference = "Stop"
+
+Write-Host "Checking required files..."
+$required = @(
+  "README.md",
+  "docs/architecture.md",
+  "packages/contracts/openapi.yaml",
+  "infra/docker-compose.yml",
+  "apps/api/composer.json",
+  "apps/api/routes/api.php",
+  "apps/api/app/Http/Controllers/EnterpriseController.php",
+  "apps/api/database/migrations/0001_01_01_000000_create_controlpanel_schema.php",
+  "apps/api/database/migrations/0001_01_01_000001_create_enterprise_control_layers.php",
+  "apps/api/database/migrations/0001_01_01_000002_create_agent_command_contract.php",
+  "apps/api/database/migrations/0001_01_01_000003_create_site_runtime_objects.php",
+  "apps/api/database/migrations/0001_01_01_000004_create_global_consistency_engine.php",
+  "apps/api/database/migrations/0001_01_01_000005_create_billing_enforcement_engine.php",
+  "apps/api/database/migrations/0001_01_01_000006_create_stability_layer.php",
+  "apps/api/database/migrations/0001_01_01_000007_create_operation_journal.php",
+  "apps/web/package.json",
+  "apps/web/app/page.tsx",
+  "apps/agent/go.mod",
+  "apps/agent/cmd/agent/main.go",
+  "docs/enterprise-finish.md",
+  "docs/agent-control-plane-contract.md",
+  "docs/execution-engine.md",
+  "docs/global-consistency-engine.md",
+  "docs/billing-enforcement-engine.md",
+  "docs/final-stability-layer.md",
+  "docs/operation-journal.md",
+  "docs/vps-linux-installation.md",
+  "apps/api/app/Http/Controllers/AgentController.php",
+  "apps/api/app/Domain/Agent/AgentAuthenticator.php",
+  "apps/api/app/Domain/Agent/AgentRegistrationService.php",
+  "apps/api/app/Domain/Agent/HeartbeatService.php",
+  "apps/api/app/Domain/Commands/AgentCommandService.php",
+  "apps/api/app/Domain/Commands/SiteLifecycleCommandBuilder.php",
+  "apps/api/app/Domain/Reconciliation/StateReconciliationService.php",
+  "apps/api/app/Domain/Consistency/GlobalConsistencyEngine.php",
+  "apps/api/app/Domain/Consistency/StateDiffEngine.php",
+  "apps/api/app/Domain/Consistency/DriftResolver.php",
+  "apps/api/app/Http/Controllers/ConsistencyController.php",
+  "apps/api/app/Console/Commands/ReconcileCommand.php",
+  "apps/api/app/Console/Commands/BillingEnforceCommand.php",
+  "apps/api/app/Console/Commands/BillingEventsCommand.php",
+  "apps/api/app/Http/Controllers/BillingController.php",
+  "apps/api/app/Domain/Billing/Metering/BillingUsageMeter.php",
+  "apps/api/app/Domain/Billing/Enforcement/BillingEnforcementEngine.php",
+  "apps/api/app/Domain/Billing/Pipeline/FossBillingEventPipeline.php",
+  "apps/api/app/Http/Controllers/StabilityController.php",
+  "apps/api/app/Domain/StateMachine/StateMachineService.php",
+  "apps/api/app/Domain/StateMachine/TransitionValidator.php",
+  "apps/api/app/Domain/Locking/LockManager.php",
+  "apps/api/app/Domain/Events/EventSequencer.php",
+  "apps/api/app/Domain/Events/OperationJournal.php",
+  "apps/api/app/Http/Controllers/OperationJournalController.php",
+  "apps/api/app/Domain/Conflicts/ConflictResolver.php",
+  "scripts/install.sh",
+  "scripts/uninstall.sh",
+  "scripts/install.ps1",
+  "scripts/uninstall.ps1"
+)
+
+foreach ($file in $required) {
+  if (-not (Test-Path $file)) {
+    throw "Missing $file"
+  }
+}
+
+Write-Host "Workspace foundation is present."
