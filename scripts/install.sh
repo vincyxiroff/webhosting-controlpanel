@@ -14,6 +14,7 @@ SKIP_START="${CONTROLPANEL_SKIP_START:-false}"
 GUIDED="${CONTROLPANEL_GUIDED:-false}"
 OVERWRITE_ENV="${CONTROLPANEL_OVERWRITE_ENV:-false}"
 FREE_STALE_PORTS="${CONTROLPANEL_FREE_STALE_PORTS:-true}"
+AUTO_PORTS="${CONTROLPANEL_AUTO_PORTS:-true}"
 APP_URL="${CONTROLPANEL_APP_URL:-http://localhost:8080}"
 WEB_PORT="${CONTROLPANEL_WEB_PORT:-3000}"
 API_PORT="${CONTROLPANEL_API_PORT:-8080}"
@@ -56,6 +57,7 @@ Options:
   --ssl-domain DOMAIN   Override domain derived from APP_URL
   --skip-start          Generate files but do not start Docker services
   --no-free-ports       Do not remove stale Docker containers occupying selected ports
+  --no-auto-ports       Fail instead of selecting the next free host port
   -y, --yes             Do not prompt before starting installation
   -h, --help            Show this help
 
@@ -75,6 +77,7 @@ Environment variables:
   CONTROLPANEL_AGENT_TEMPLATE_DIR
   CONTROLPANEL_SKIP_START=true
   CONTROLPANEL_FREE_STALE_PORTS=false
+  CONTROLPANEL_AUTO_PORTS=false
   CONTROLPANEL_YES=true
 USAGE
 }
@@ -120,6 +123,10 @@ parse_args() {
         ;;
       --no-free-ports)
         FREE_STALE_PORTS="false"
+        shift
+        ;;
+      --no-auto-ports)
+        AUTO_PORTS="false"
         shift
         ;;
       -y|--yes)
@@ -258,6 +265,8 @@ run_guided_wizard() {
     SKIP_START="true"
   fi
 
+  auto_assign_ports
+
   printf '\nSummary\n'
   printf '  Project: %s\n' "$PROJECT_NAME"
   printf '  Env file: %s\n' "$ENV_FILE"
@@ -320,6 +329,60 @@ free_stale_port_containers() {
   done
 }
 
+host_port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn "( sport = :$port )" | tail -n +2 | grep -q .
+    return
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN -Pn >/dev/null 2>&1
+    return
+  fi
+  return 1
+}
+
+port_in_use() {
+  local port="$1"
+  [[ -n "$(container_ids_for_port "$port" | head -n 1)" ]] && return 0
+  host_port_in_use "$port"
+}
+
+next_free_port() {
+  local port="$1"
+  while port_in_use "$port"; do
+    port=$((port + 1))
+  done
+  printf '%s' "$port"
+}
+
+auto_assign_port_var() {
+  local var_name="$1"
+  local label="$2"
+  local current
+  local next
+  current="${!var_name}"
+  [[ -n "$current" ]] || return 0
+  if ! port_in_use "$current"; then
+    return 0
+  fi
+  if [[ "$AUTO_PORTS" != "true" ]]; then
+    fail "$label port $current is already in use. Choose another port or enable automatic port assignment."
+  fi
+  next="$(next_free_port "$((current + 1))")"
+  log "$label port $current is busy; using $next"
+  printf -v "$var_name" '%s' "$next"
+}
+
+auto_assign_ports() {
+  free_stale_port_containers
+  auto_assign_port_var WEB_PORT "Dashboard"
+  auto_assign_port_var API_PORT "API"
+  auto_assign_port_var POSTGRES_PORT "PostgreSQL"
+  auto_assign_port_var REDIS_PORT "Redis"
+  auto_assign_port_var POWERDNS_API_PORT "PowerDNS API"
+}
+
 assert_ports_available() {
   local port ids
   for port in "$WEB_PORT" "$API_PORT" "$POSTGRES_PORT" "$REDIS_PORT" "$POWERDNS_API_PORT"; do
@@ -328,7 +391,7 @@ assert_ports_available() {
     if [[ -n "$ids" ]]; then
       fail "Port $port is still used by Docker container(s): $ids. Run scripts/uninstall.sh --project $PROJECT_NAME --yes or rerun install with stale port cleanup enabled."
     fi
-    if command -v ss >/dev/null 2>&1 && ss -ltn "( sport = :$port )" | tail -n +2 | grep -q .; then
+    if host_port_in_use "$port"; then
       fail "Port $port is already in use by a host process. Stop that process or choose another port."
     fi
   done
@@ -570,13 +633,13 @@ main() {
   parse_args "$@"
   run_guided_wizard
   check_platform
+  auto_assign_ports
   confirm_install
   write_env
 
   if [[ "$SKIP_START" == "true" ]]; then
     log "Skipping Docker service start"
   else
-    free_stale_port_containers
     assert_ports_available
     log "Building and starting services"
     docker_compose --env-file "$ENV_FILE" up -d --build
