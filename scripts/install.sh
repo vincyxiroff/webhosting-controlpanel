@@ -145,6 +145,21 @@ prompt_default() {
   printf '%s' "${answer:-$default}"
 }
 
+prompt_default_into() {
+  local __var_name="$1"
+  local label="$2"
+  local default="$3"
+  local answer
+
+  printf '%s [%s]: ' "$label" "$default"
+
+  if ! IFS= read -r answer; then
+    answer="$default"
+  fi
+
+  printf -v "$__var_name" '%s' "${answer:-$default}"
+}
+
 prompt_yes_no() {
   local label="$1"
   local default="$2"
@@ -200,25 +215,25 @@ run_guided_wizard() {
 
   printf '\nControlPanel OS guided installer\n'
   printf '%s\n' '--------------------------------'
-  PROJECT_NAME="$(prompt_default 'Docker project name' "$PROJECT_NAME")"
-  ENV_FILE="$(prompt_default 'Environment file path' "$ENV_FILE")"
+  prompt_default_into PROJECT_NAME 'Docker project name' "$PROJECT_NAME"
+  prompt_default_into ENV_FILE 'Environment file path' "$ENV_FILE"
   if [[ -f "$ENV_FILE" ]] && prompt_yes_no 'Env file exists. Regenerate it?' false; then
     OVERWRITE_ENV="true"
   fi
-  APP_URL="$(prompt_default 'Public API/control-plane URL' "$APP_URL")"
-  WEB_PORT="$(prompt_default 'Dashboard port' "$WEB_PORT")"
-  API_PORT="$(prompt_default 'API port' "$API_PORT")"
-  POSTGRES_PORT="$(prompt_default 'PostgreSQL host port' "$POSTGRES_PORT")"
-  REDIS_PORT="$(prompt_default 'Redis host port' "$REDIS_PORT")"
-  POWERDNS_DNS_PORT="$(prompt_default 'PowerDNS DNS host port' "$POWERDNS_DNS_PORT")"
-  POWERDNS_API_PORT="$(prompt_default 'PowerDNS API host port' "$POWERDNS_API_PORT")"
+  prompt_default_into APP_URL 'Public API/control-plane URL' "$APP_URL"
+  prompt_default_into WEB_PORT 'Dashboard port' "$WEB_PORT"
+  prompt_default_into API_PORT 'API port' "$API_PORT"
+  prompt_default_into POSTGRES_PORT 'PostgreSQL host port' "$POSTGRES_PORT"
+  prompt_default_into REDIS_PORT 'Redis host port' "$REDIS_PORT"
+  prompt_default_into POWERDNS_DNS_PORT 'PowerDNS DNS host port' "$POWERDNS_DNS_PORT"
+  prompt_default_into POWERDNS_API_PORT 'PowerDNS API host port' "$POWERDNS_API_PORT"
   resolve_ssl_defaults
 
   if [[ "$(url_scheme "$APP_URL")" == "https" ]]; then
     if prompt_yes_no "Configure SSL for $(url_host "$APP_URL") with Let's Encrypt?" "$ENABLE_SSL"; then
       ENABLE_SSL="true"
-      SSL_DOMAIN="$(prompt_default 'SSL domain' "${SSL_DOMAIN:-$(url_host "$APP_URL")}")"
-      SSL_EMAIL="$(prompt_default 'Let'\''s Encrypt email' "${SSL_EMAIL:-admin@${SSL_DOMAIN#www.}}")"
+      prompt_default_into SSL_DOMAIN 'SSL domain' "${SSL_DOMAIN:-$(url_host "$APP_URL")}"
+      prompt_default_into SSL_EMAIL 'Let'\''s Encrypt email' "${SSL_EMAIL:-admin@${SSL_DOMAIN#www.}}"
     else
       ENABLE_SSL="false"
     fi

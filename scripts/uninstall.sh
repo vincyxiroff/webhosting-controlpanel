@@ -119,6 +119,21 @@ prompt_default() {
   printf '%s' "${answer:-$default}"
 }
 
+prompt_default_into() {
+  local __var_name="$1"
+  local label="$2"
+  local default="$3"
+  local answer
+
+  printf '%s [%s]: ' "$label" "$default"
+
+  if ! IFS= read -r answer; then
+    answer="$default"
+  fi
+
+  printf -v "$__var_name" '%s' "${answer:-$default}"
+}
+
 prompt_yes_no() {
   local label="$1"
   local default="$2"
@@ -142,8 +157,8 @@ run_guided_wizard() {
 
   printf '\nControlPanel OS guided uninstaller\n'
   printf '%s\n' '----------------------------------'
-  PROJECT_NAME="$(prompt_default 'Docker project name' "$PROJECT_NAME")"
-  ENV_FILE="$(prompt_default 'Environment file path' "$ENV_FILE")"
+  prompt_default_into PROJECT_NAME 'Docker project name' "$PROJECT_NAME"
+  prompt_default_into ENV_FILE 'Environment file path' "$ENV_FILE"
 
   if prompt_yes_no 'Delete Docker volumes and hosted data?' "$REMOVE_DATA"; then
     REMOVE_DATA="true"
