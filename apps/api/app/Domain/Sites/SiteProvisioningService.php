@@ -50,6 +50,7 @@ final class SiteProvisioningService
                 'status' => 'pending_provision',
                 'repository' => json_encode($input['repository'] ?? null, JSON_THROW_ON_ERROR),
                 'environment' => json_encode($input['environment'] ?? [], JSON_THROW_ON_ERROR),
+                'runtime_config' => json_encode($this->runtimeConfig($input), JSON_THROW_ON_ERROR),
                 'quotas' => json_encode($requirements, JSON_THROW_ON_ERROR),
                 'created_by' => $actorId,
                 'created_at' => now(),
@@ -85,5 +86,18 @@ final class SiteProvisioningService
 
             return ['id' => $siteId, 'status' => 'provisioning', 'placement' => $placement];
         });
+    }
+
+    private function runtimeConfig(array $input): array
+    {
+        return array_filter([
+            'vhost_template' => $input['vhost_template'] ?? null,
+            'document_root' => $input['document_root'] ?? null,
+            'app_port' => $input['app_port'] ?? null,
+            'host_port' => $input['host_port'] ?? null,
+            'install_command' => $input['install_command'] ?? null,
+            'build_command' => $input['build_command'] ?? null,
+            'start_command' => $input['start_command'] ?? null,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
     }
 }

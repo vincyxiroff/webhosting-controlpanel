@@ -256,6 +256,7 @@ This builds:
 /usr/local/bin/controlpanel-agent
 /etc/systemd/system/controlpanel-agent.service
 /etc/controlpanel/agent.yaml
+/etc/controlpanel/vhost-templates/*.conf
 ```
 
 Edit agent config:
@@ -275,6 +276,7 @@ ca_cert_path: /etc/controlpanel/ca.pem
 client_cert_path: /etc/controlpanel/client.pem
 client_key_path: /etc/controlpanel/client-key.pem
 nginx_config_dir: /etc/nginx/conf.d/controlpanel
+nginx_template_dir: /etc/controlpanel/vhost-templates
 site_data_dir: /var/lib/controlpanel/sites
 ```
 

@@ -56,6 +56,19 @@ NGINX generation is runtime-aware:
 
 - PHP uses `fastcgi_pass` to the per-site PHP-FPM container.
 - Static/Node/Python/Go/Docker use HTTP reverse proxy to the per-site container.
+- Local vhost presets live in `infra/nginx/vhost-templates` and are adapted from common CloudPanel-style hosting template patterns for this platform's placeholders and Docker runtime model.
+
+Supported local vhost presets:
+
+| Preset | Intended use |
+| --- | --- |
+| `generic-php` | PHP apps with front-controller routing. |
+| `laravel` | Laravel apps using `/public` as document root. |
+| `wordpress` | WordPress with `xmlrpc.php` blocked and PHP-FPM routing. |
+| `nodejs` | Node.js apps with websocket headers and long upstream timeouts. |
+| `static` | Static files served directly from the node site directory. |
+| `reverse-proxy` | Node/Go/Rust/Bun/Deno/Docker upstreams with websocket headers and long timeouts. |
+| `python` | Gunicorn/Uvicorn style upstreams. |
 
 ## NGINX Automation
 
@@ -152,9 +165,9 @@ Command failures:
 ## Performance Considerations
 
 - Pull-based commands avoid inbound node connectivity requirements.
+- App containers are published to `127.0.0.1:{host_port}` only when needed; NGINX proxies through the allocated localhost port.
 - Per-node command pulls use row locks to avoid duplicate delivery.
 - Docker image pull happens in `runtime.provision` before container creation.
 - NGINX reload is done only after config validation.
 - Heartbeats should stay at 30s in production; container stats are collected with `docker stats --no-stream`.
 - Large clusters should shard command polling and heartbeat ingestion by node group.
-

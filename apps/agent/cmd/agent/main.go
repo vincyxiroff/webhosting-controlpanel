@@ -22,6 +22,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("config: %v", err)
 	}
+	if cfg.NginxConfigDir != "" {
+		_ = os.Setenv("CONTROLPANEL_NGINX_CONFIG_DIR", cfg.NginxConfigDir)
+	}
+	if cfg.NginxTemplateDir != "" {
+		_ = os.Setenv("CONTROLPANEL_NGINX_TEMPLATE_DIR", cfg.NginxTemplateDir)
+	}
+	if cfg.SiteDataDir != "" {
+		_ = os.Setenv("CONTROLPANEL_SITE_DATA_DIR", cfg.SiteDataDir)
+	}
 
 	client, err := controlplane.NewClient(cfg)
 	if err != nil {

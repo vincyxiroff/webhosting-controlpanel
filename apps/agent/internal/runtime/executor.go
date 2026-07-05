@@ -15,11 +15,11 @@ import (
 )
 
 type Command struct {
-	ID      string         `json:"id"`
-	Name    string         `json:"command"`
-	Payload map[string]any `json:"payload"`
-	IdempotencyKey string   `json:"idempotency_key"`
-	Attempt int            `json:"attempt"`
+	ID             string         `json:"id"`
+	Name           string         `json:"command"`
+	Payload        map[string]any `json:"payload"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	Attempt        int            `json:"attempt"`
 }
 
 type Result struct {
@@ -29,16 +29,18 @@ type Result struct {
 }
 
 type DockerExecutor struct {
-	siteDataDir string
-	nginxConfigDir string
+	siteDataDir      string
+	nginxConfigDir   string
 	nginxVersionsDir string
+	nginxTemplateDir string
 }
 
 func NewDockerExecutor() (*DockerExecutor, error) {
 	return &DockerExecutor{
-		siteDataDir: getenv("CONTROLPANEL_SITE_DATA_DIR", "/var/lib/controlpanel/sites"),
-		nginxConfigDir: getenv("CONTROLPANEL_NGINX_CONFIG_DIR", "/etc/nginx/conf.d/controlpanel"),
+		siteDataDir:      getenv("CONTROLPANEL_SITE_DATA_DIR", "/var/lib/controlpanel/sites"),
+		nginxConfigDir:   getenv("CONTROLPANEL_NGINX_CONFIG_DIR", "/etc/nginx/conf.d/controlpanel"),
 		nginxVersionsDir: getenv("CONTROLPANEL_NGINX_VERSION_DIR", "/var/lib/controlpanel/nginx-revisions"),
+		nginxTemplateDir: getenv("CONTROLPANEL_NGINX_TEMPLATE_DIR", "/etc/controlpanel/vhost-templates"),
 	}, nil
 }
 
@@ -87,7 +89,7 @@ func (e *DockerExecutor) runtimeProvision(ctx context.Context, command Command) 
 		}
 	}
 	return Result{Status: "success", Message: "runtime image available", Meta: map[string]any{
-		"runtime_type": runtimeName,
+		"runtime_type":    runtimeName,
 		"runtime_version": command.Payload["version"],
 	}}
 }
@@ -143,23 +145,28 @@ func (e *DockerExecutor) createSite(ctx context.Context, command Command) Result
 		"--health-timeout", "5s",
 		"--health-retries", "3",
 		"-v", volumeName + ":/app",
-		image,
+		"-w", "/app",
 	}
+	args = append(args, runtimeEnvArgs(command.Payload)...)
+	args = append(args, runtimePublishArgs(command.Payload)...)
+	args = append(args, image)
+	args = append(args, runtimeCommandArgs(command.Payload)...)
 	out, err := exec.CommandContext(ctx, "docker", args...).CombinedOutput()
 	if err != nil {
 		return Result{Status: "failed", Message: string(out)}
 	}
 	containerID := strings.TrimSpace(string(out))
 	return Result{Status: "success", Message: "site container created", Meta: map[string]any{
-		"site_id": siteID,
-		"container_id": containerID,
-		"container_name": name,
-		"network_id": networkID,
-		"network_name": networkName,
-		"volume_id": volumeID,
-		"volume_name": volumeName,
-		"runtime_type": runtimeName(command.Payload),
+		"site_id":         siteID,
+		"container_id":    containerID,
+		"container_name":  name,
+		"network_id":      networkID,
+		"network_name":    networkName,
+		"volume_id":       volumeID,
+		"volume_name":     volumeName,
+		"runtime_type":    runtimeName(command.Payload),
 		"runtime_version": command.Payload["runtime_version"],
+		"app_port":        appPort(command.Payload),
 		"resource_limits": limits,
 	}}
 }
@@ -177,8 +184,8 @@ func (e *DockerExecutor) attachVolume(ctx context.Context, command Command) Resu
 		return Result{Status: "failed", Message: err.Error()}
 	}
 	return Result{Status: "success", Message: "volume attached", Meta: map[string]any{
-		"site_id": siteID,
-		"volume_id": volumeID,
+		"site_id":     siteID,
+		"volume_id":   volumeID,
 		"volume_name": volumeName,
 	}}
 }
@@ -195,20 +202,17 @@ func (e *DockerExecutor) configureNginx(ctx context.Context, command Command) Re
 	if err := os.MkdirAll(e.nginxVersionsDir, 0750); err != nil {
 		return Result{Status: "failed", Message: err.Error()}
 	}
-	port := 8080
+	port := appPort(command.Payload)
 	runtimeKind := runtimeName(command.Payload)
-	if raw, ok := command.Payload["upstream_port"]; ok {
-		switch value := raw.(type) {
-		case float64:
-			port = int(value)
-		case string:
-			if parsed, err := strconv.Atoi(value); err == nil {
-				port = parsed
-			}
-		}
+	if hostPort := hostPort(command.Payload); hostPort > 0 {
+		port = hostPort
 	}
-	version := configVersion(siteID, domain)
-	config := nginxConfig(siteID, domain, runtimeKind, port)
+	templateName := vhostTemplateName(command.Payload, runtimeKind)
+	version := configVersion(siteID, domain+":"+templateName)
+	config, err := e.renderNginxConfig(siteID, domain, runtimeKind, templateName, port, command.Payload)
+	if err != nil {
+		return Result{Status: "failed", Message: err.Error()}
+	}
 	path := filepath.Join(e.nginxConfigDir, siteID+".conf")
 	versionPath := filepath.Join(e.nginxVersionsDir, siteID+"-"+version+".conf")
 	backupPath := path + ".rollback"
@@ -234,25 +238,119 @@ func (e *DockerExecutor) configureNginx(ctx context.Context, command Command) Re
 		}
 	}
 	return Result{Status: "success", Message: "nginx configured", Meta: map[string]any{
-		"site_id": siteID,
-		"nginx_config_path": path,
+		"site_id":              siteID,
+		"nginx_config_path":    path,
 		"nginx_config_version": version,
+		"nginx_template":       templateName,
 	}}
 }
 
-func nginxConfig(siteID string, domain string, runtimeKind string, port int) string {
-	if runtimeKind == "php" {
-		return fmt.Sprintf(`upstream cp_%s {
-    server %s:%d;
+func (e *DockerExecutor) renderNginxConfig(siteID string, domain string, runtimeKind string, templateName string, port int, payload map[string]any) (string, error) {
+	upstreamName := "cp_" + safeNginxName(siteID)
+	upstreamServer := containerName(siteID)
+	if hostPort(payload) > 0 {
+		upstreamServer = "127.0.0.1"
+	}
+	templateBody, err := e.loadNginxTemplate(templateName)
+	if err != nil {
+		return "", err
+	}
+	documentRoot := stringValueDefault(payload, "document_root", "/app")
+	if runtimeKind == "static" {
+		documentRoot = stringValueDefault(payload, "document_root", filepath.Join(e.siteDataDir, siteID))
+	}
+	replacements := map[string]string{
+		"{{ site_id }}":       siteID,
+		"{{ server_names }}":  sanitizeServerNames(domain),
+		"{{ domain }}":        domain,
+		"{{ upstream_name }}": upstreamName,
+		"{{ upstream_url }}":  "http://" + upstreamName,
+		"{{ document_root }}": documentRoot,
+	}
+	for token, value := range replacements {
+		templateBody = strings.ReplaceAll(templateBody, token, value)
+	}
+
+	if runtimeKind == "static" && templateName == "static" {
+		return templateBody, nil
+	}
+
+	return fmt.Sprintf("upstream %s {\n    server %s:%d;\n}\n\n%s", upstreamName, upstreamServer, port, templateBody), nil
 }
 
-server {
+func (e *DockerExecutor) loadNginxTemplate(templateName string) (string, error) {
+	if safe := safeTemplateName(templateName); safe != "" {
+		path := filepath.Join(e.nginxTemplateDir, safe+".conf")
+		if content, err := os.ReadFile(path); err == nil {
+			return string(content), nil
+		}
+	}
+
+	if fallback, ok := embeddedNginxTemplates()[templateName]; ok {
+		return fallback, nil
+	}
+	if fallback, ok := embeddedNginxTemplates()["reverse-proxy"]; ok {
+		return fallback, nil
+	}
+
+	return "", fmt.Errorf("nginx template %s not found", templateName)
+}
+
+func embeddedNginxTemplates() map[string]string {
+	return map[string]string{
+		"generic-php": `server {
     listen 80;
-    server_name %s;
-    root /app/public;
+    listen [::]:80;
+    server_name {{ server_names }};
+    root {{ document_root }};
     index index.php index.html;
-    access_log /var/log/nginx/controlpanel-%s-access.log;
-    error_log /var/log/nginx/controlpanel-%s-error.log warn;
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/controlpanel/acme/{{ site_id }};
+        auth_basic off;
+        allow all;
+    }
+
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_intercept_errors on;
+        fastcgi_index index.php;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param HTTPS $https if_not_empty;
+        fastcgi_read_timeout 3600;
+        fastcgi_send_timeout 3600;
+        try_files $uri =404;
+        fastcgi_pass {{ upstream_name }};
+    }
+}`,
+		"laravel": `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ server_names }};
+    root {{ document_root }}/public;
+    index index.php index.html;
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/controlpanel/acme/{{ site_id }};
+        auth_basic off;
+        allow all;
+    }
+
+    location ~ /\.(?!well-known) {
+        deny all;
+    }
 
     location / {
         try_files $uri $uri/ /index.php?$query_string;
@@ -261,30 +359,127 @@ server {
     location ~ \.php$ {
         include fastcgi_params;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        fastcgi_pass cp_%s;
+        try_files $uri =404;
+        fastcgi_pass {{ upstream_name }};
     }
-}
-`, safeNginxName(siteID), containerName(siteID), port, domain, siteID, siteID, safeNginxName(siteID))
-	}
-	return fmt.Sprintf(`upstream cp_%s {
-    server %s:%d;
-}
-
-server {
+}`,
+		"wordpress": `server {
     listen 80;
-    server_name %s;
-    access_log /var/log/nginx/controlpanel-%s-access.log;
-    error_log /var/log/nginx/controlpanel-%s-error.log warn;
+    listen [::]:80;
+    server_name {{ server_names }};
+    root {{ document_root }};
+    index index.php index.html;
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location = /xmlrpc.php {
+        deny all;
+    }
 
     location / {
-        proxy_pass http://cp_%s;
-        proxy_set_header Host $host;
+        try_files $uri $uri/ /index.php?$args;
+    }
+
+    location ~ \.php$ {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        try_files $uri =404;
+        fastcgi_pass {{ upstream_name }};
+    }
+}`,
+		"nodejs": `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ server_names }};
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/controlpanel/acme/{{ site_id }};
+        auth_basic off;
+        allow all;
+    }
+
+    location / {
+        proxy_pass http://{{ upstream_name }};
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_cache_bypass $http_upgrade;
+        proxy_connect_timeout 900;
+        proxy_send_timeout 900;
+        proxy_read_timeout 900;
     }
-}
-`, safeNginxName(siteID), containerName(siteID), port, domain, siteID, siteID, safeNginxName(siteID))
+}`,
+		"reverse-proxy": `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ server_names }};
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/lib/controlpanel/acme/{{ site_id }};
+        auth_basic off;
+        allow all;
+    }
+
+    location / {
+        proxy_pass http://{{ upstream_name }};
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Server $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 900;
+        proxy_send_timeout 900;
+        proxy_read_timeout 900;
+    }
+}`,
+		"python": `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ server_names }};
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location / {
+        proxy_pass http://{{ upstream_name }};
+        proxy_http_version 1.1;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $http_host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 900;
+    }
+}`,
+		"static": `server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ server_names }};
+    root {{ document_root }};
+    index index.html;
+    access_log /var/log/nginx/controlpanel-{{ site_id }}-access.log;
+    error_log /var/log/nginx/controlpanel-{{ site_id }}-error.log warn;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}`,
+	}
 }
 
 func stringValue(payload map[string]any, key string) string {
@@ -292,6 +487,79 @@ func stringValue(payload map[string]any, key string) string {
 		return value
 	}
 	return ""
+}
+
+func stringValueDefault(payload map[string]any, key string, fallback string) string {
+	if value := stringValue(payload, key); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func vhostTemplateName(payload map[string]any, runtimeKind string) string {
+	if value := safeTemplateName(stringValue(payload, "vhost_template")); value != "" {
+		return value
+	}
+	if value := safeTemplateName(stringValue(payload, "app_template")); value != "" {
+		return value
+	}
+	switch runtimeKind {
+	case "php":
+		return "generic-php"
+	case "python":
+		return "python"
+	case "node":
+		return "nodejs"
+	case "static":
+		return "static"
+	case "go", "rust", "bun", "deno", "docker", "reverse_proxy":
+		return "reverse-proxy"
+	default:
+		return "reverse-proxy"
+	}
+}
+
+func safeTemplateName(name string) string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	name = strings.ReplaceAll(name, "_", "-")
+	if name == "" {
+		return ""
+	}
+	for _, char := range name {
+		if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' {
+			return ""
+		}
+	}
+	return name
+}
+
+func sanitizeServerNames(value string) string {
+	parts := strings.Fields(strings.ReplaceAll(value, ",", " "))
+	if len(parts) == 0 {
+		return "_"
+	}
+	safe := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.ToLower(strings.TrimSpace(part))
+		part = strings.Trim(part, ".")
+		if part == "" {
+			continue
+		}
+		allowed := true
+		for _, char := range part {
+			if (char < 'a' || char > 'z') && (char < '0' || char > '9') && char != '-' && char != '.' && char != '*' {
+				allowed = false
+				break
+			}
+		}
+		if allowed {
+			safe = append(safe, part)
+		}
+	}
+	if len(safe) == 0 {
+		return "_"
+	}
+	return strings.Join(safe, " ")
 }
 
 func (e *DockerExecutor) writeBlockedNginx(ctx context.Context, siteID string, domain string, reason string) error {
@@ -542,10 +810,117 @@ func resourceLimits(payload map[string]any) map[string]string {
 	cpuMillicores := numberFrom(quotas, "cpu_millicores", 500)
 	memoryMb := numberFrom(quotas, "memory_mb", 512)
 	return map[string]string{
-		"cpus": fmt.Sprintf("%.3f", float64(cpuMillicores)/1000.0),
-		"memory": fmt.Sprintf("%dm", memoryMb),
+		"cpus":       fmt.Sprintf("%.3f", float64(cpuMillicores)/1000.0),
+		"memory":     fmt.Sprintf("%dm", memoryMb),
 		"pids_limit": "256",
 	}
+}
+
+func appPort(payload map[string]any) int {
+	if raw, ok := payload["app_port"]; ok {
+		switch value := raw.(type) {
+		case float64:
+			return int(value)
+		case int:
+			return value
+		case string:
+			if parsed, err := strconv.Atoi(value); err == nil {
+				return parsed
+			}
+		}
+	}
+	if raw, ok := payload["upstream_port"]; ok {
+		switch value := raw.(type) {
+		case float64:
+			return int(value)
+		case int:
+			return value
+		case string:
+			if parsed, err := strconv.Atoi(value); err == nil {
+				return parsed
+			}
+		}
+	}
+	switch runtimeName(payload) {
+	case "node":
+		return 3000
+	case "python":
+		return 8000
+	case "php":
+		return 9000
+	case "static":
+		return 80
+	default:
+		return 8080
+	}
+}
+
+func hostPort(payload map[string]any) int {
+	raw, ok := payload["host_port"]
+	if !ok {
+		return 0
+	}
+	switch value := raw.(type) {
+	case float64:
+		return int(value)
+	case int:
+		return value
+	case string:
+		if parsed, err := strconv.Atoi(value); err == nil {
+			return parsed
+		}
+	}
+	return 0
+}
+
+func runtimeEnvArgs(payload map[string]any) []string {
+	port := strconv.Itoa(appPort(payload))
+	args := []string{"-e", "PORT=" + port, "-e", "HOST=0.0.0.0"}
+	if runtimeName(payload) == "node" {
+		args = append(args, "-e", "NODE_ENV="+stringValueDefault(payload, "node_env", "production"))
+	}
+	return args
+}
+
+func runtimePublishArgs(payload map[string]any) []string {
+	port := hostPort(payload)
+	if port == 0 {
+		return []string{}
+	}
+
+	return []string{"-p", fmt.Sprintf("127.0.0.1:%d:%d/tcp", port, appPort(payload))}
+}
+
+func runtimeCommandArgs(payload map[string]any) []string {
+	switch runtimeName(payload) {
+	case "node":
+		return []string{"sh", "-lc", nodeBootstrapCommand(payload)}
+	default:
+		return []string{}
+	}
+}
+
+func nodeBootstrapCommand(payload map[string]any) string {
+	installCommand := stringValue(payload, "install_command")
+	if installCommand == "" {
+		installCommand = `if [ -f package-lock.json ]; then npm ci --omit=dev || npm install --omit=dev; elif [ -f package.json ]; then npm install --omit=dev; fi`
+	}
+	buildCommand := stringValue(payload, "build_command")
+	if buildCommand == "" {
+		buildCommand = `if [ -f package.json ] && npm run | grep -qE '(^|[[:space:]])build($|[[:space:]])'; then npm run build; fi`
+	}
+	startCommand := stringValue(payload, "start_command")
+	if startCommand == "" {
+		startCommand = `if [ -f package.json ] && npm run | grep -qE '(^|[[:space:]])start($|[[:space:]])'; then npm run start; elif [ -f server.js ]; then node server.js; elif [ -f index.js ]; then node index.js; else echo "No Node.js start command found"; exit 78; fi`
+	}
+
+	return strings.Join([]string{
+		"set -e",
+		"cd /app",
+		installCommand,
+		buildCommand,
+		startCommand,
+	}, " && ")
 }
 
 func numberFrom(values map[string]any, key string, fallback int) int {
@@ -569,6 +944,10 @@ func healthCommand(payload map[string]any) string {
 	switch runtimeName(payload) {
 	case "static":
 		return "wget -qO- http://127.0.0.1/ >/dev/null || exit 1"
+	case "node":
+		return fmt.Sprintf("node -e \"require('http').get('http://127.0.0.1:%d/', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))\"", appPort(payload))
+	case "python":
+		return fmt.Sprintf("python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:%d/', timeout=5)\"", appPort(payload))
 	default:
 		return "test -d /app || exit 1"
 	}
@@ -613,16 +992,16 @@ func (e *DockerExecutor) runtimeMeta(ctx context.Context, siteID string, payload
 	networkID, _ := dockerInspectID(ctx, "network", networkName(siteID))
 	volumeID, _ := dockerInspectID(ctx, "volume", volumeName(siteID))
 	return map[string]any{
-		"site_id": siteID,
-		"container_id": containerID,
-		"container_name": containerName(siteID),
-		"network_id": networkID,
-		"network_name": networkName(siteID),
-		"volume_id": volumeID,
-		"volume_name": volumeName(siteID),
-		"runtime_type": runtimeName(payload),
+		"site_id":         siteID,
+		"container_id":    containerID,
+		"container_name":  containerName(siteID),
+		"network_id":      networkID,
+		"network_name":    networkName(siteID),
+		"volume_id":       volumeID,
+		"volume_name":     volumeName(siteID),
+		"runtime_type":    runtimeName(payload),
 		"runtime_version": payload["runtime_version"],
 		"resource_limits": resourceLimits(payload),
-		"health": inspectHealth(ctx, containerName(siteID)),
+		"health":          inspectHealth(ctx, containerName(siteID)),
 	}
 }

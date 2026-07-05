@@ -3,6 +3,7 @@
 namespace App\Domain\Commands;
 
 use App\Domain\Events\OperationJournal;
+use App\Domain\Networking\PortAllocator;
 use Illuminate\Support\Facades\DB;
 
 final class SiteLifecycleCommandBuilder
@@ -10,17 +11,19 @@ final class SiteLifecycleCommandBuilder
     public function __construct(
         private readonly AgentCommandService $commands,
         private readonly OperationJournal $journal,
+        private readonly PortAllocator $ports,
     )
     {
     }
 
     public function create(string $nodeId, string $siteId, array $site): void
     {
+        $site = $this->withAllocatedPorts($nodeId, $siteId, $site);
         $steps = [
             'runtime.provision' => ['runtime' => $site['runtime'], 'version' => $site['runtime_version']],
             'site.create' => $site,
             'volume.attach' => ['site_id' => $siteId],
-            'nginx.configure' => ['site_id' => $siteId, 'domain' => $site['primary_domain'], 'runtime' => $site['runtime'], 'upstream_port' => $site['upstream_port'] ?? $this->defaultPort($site['runtime'])],
+            'nginx.configure' => $this->nginxPayload($siteId, $site),
             'service.start' => ['site_id' => $siteId],
             'health.check' => ['site_id' => $siteId, 'path' => '/'],
         ];
@@ -43,14 +46,16 @@ final class SiteLifecycleCommandBuilder
             $commandId = $this->commands->create($nodeId, $command, ['site_id' => $siteId], $command . ':' . $siteId, $siteId);
             $this->recordQueued($siteId, $nodeId, $commandId, $command, ['site_id' => $siteId], $command . ':' . $siteId);
         }
+        $this->ports->releaseSite($siteId);
     }
 
     public function update(string $nodeId, string $siteId, array $site): void
     {
+        $site = $this->withAllocatedPorts($nodeId, $siteId, $site);
         $revision = substr(hash('sha256', json_encode($site, JSON_THROW_ON_ERROR)), 0, 16);
         foreach ([
             'runtime.provision' => ['runtime' => $site['runtime'], 'version' => $site['runtime_version']],
-            'nginx.configure' => ['site_id' => $siteId, 'domain' => $site['primary_domain'], 'runtime' => $site['runtime'], 'upstream_port' => $site['upstream_port'] ?? $this->defaultPort($site['runtime'])],
+            'nginx.configure' => $this->nginxPayload($siteId, $site),
             'service.start' => ['site_id' => $siteId],
             'health.check' => ['site_id' => $siteId, 'path' => '/'],
         ] as $command => $payload) {
@@ -71,9 +76,10 @@ final class SiteLifecycleCommandBuilder
 
     public function restore(string $nodeId, string $siteId, array $site): void
     {
+        $site = $this->withAllocatedPorts($nodeId, $siteId, $site);
         foreach ([
             'site.restore' => $site,
-            'nginx.configure' => ['site_id' => $siteId, 'domain' => $site['primary_domain'], 'runtime' => $site['runtime'], 'upstream_port' => $site['upstream_port'] ?? $this->defaultPort($site['runtime'])],
+            'nginx.configure' => $this->nginxPayload($siteId, $site),
             'service.start' => ['site_id' => $siteId],
             'health.check' => ['site_id' => $siteId, 'path' => '/'],
         ] as $command => $payload) {
@@ -109,6 +115,81 @@ final class SiteLifecycleCommandBuilder
             'site.suspend' => 'SiteSuspend',
             'site.restore' => 'SiteRestore',
             default => str_replace('.', '', ucwords($command, '.')),
+        };
+    }
+
+    private function nginxPayload(string $siteId, array $site): array
+    {
+        $site = $this->withRuntimeConfig($site);
+        $runtime = $site['runtime'];
+        $template = $site['vhost_template'] ?? $site['app_template'] ?? $this->templateForRuntime($runtime);
+
+        return [
+            'site_id' => $siteId,
+            'domain' => $site['primary_domain'],
+            'runtime' => $runtime,
+            'upstream_port' => $site['app_port'] ?? $site['upstream_port'] ?? $this->defaultPort($runtime),
+            'app_port' => $site['app_port'] ?? $site['upstream_port'] ?? $this->defaultPort($runtime),
+            'host_port' => $site['host_port'] ?? null,
+            'vhost_template' => $template,
+            'document_root' => $site['document_root'] ?? '/app',
+            'install_command' => $site['install_command'] ?? null,
+            'build_command' => $site['build_command'] ?? null,
+            'start_command' => $site['start_command'] ?? null,
+        ];
+    }
+
+    private function withAllocatedPorts(string $nodeId, string $siteId, array $site): array
+    {
+        $site = $this->withRuntimeConfig($site);
+        $allocation = $this->ports->allocate($nodeId, $siteId, $site['runtime'], $site);
+        $site = $site + $allocation;
+        $site['app_port'] = $allocation['app_port'];
+        $site['host_port'] = $allocation['host_port'];
+        $this->persistRuntimeConfig($siteId, $site);
+
+        return $site;
+    }
+
+    private function persistRuntimeConfig(string $siteId, array $site): void
+    {
+        $config = array_filter([
+            'vhost_template' => $site['vhost_template'] ?? null,
+            'document_root' => $site['document_root'] ?? null,
+            'app_port' => $site['app_port'] ?? null,
+            'host_port' => $site['host_port'] ?? null,
+            'install_command' => $site['install_command'] ?? null,
+            'build_command' => $site['build_command'] ?? null,
+            'start_command' => $site['start_command'] ?? null,
+        ], fn (mixed $value): bool => $value !== null && $value !== '');
+        DB::table('sites')->where('id', $siteId)->update([
+            'runtime_config' => json_encode($config, JSON_THROW_ON_ERROR),
+            'updated_at' => now(),
+        ]);
+    }
+
+    private function withRuntimeConfig(array $site): array
+    {
+        $config = $site['runtime_config'] ?? [];
+        if (is_string($config) && $config !== '') {
+            $config = json_decode($config, true, 512, JSON_THROW_ON_ERROR) ?? [];
+        }
+        if (! is_array($config)) {
+            $config = [];
+        }
+
+        return $site + $config;
+    }
+
+    private function templateForRuntime(string $runtime): string
+    {
+        return match ($runtime) {
+            'php' => 'generic-php',
+            'static' => 'static',
+            'python' => 'python',
+            'node' => 'nodejs',
+            'go', 'rust', 'bun', 'deno', 'docker', 'reverse_proxy' => 'reverse-proxy',
+            default => 'reverse-proxy',
         };
     }
 

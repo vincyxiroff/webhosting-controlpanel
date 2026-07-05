@@ -28,6 +28,13 @@ final class SiteController
             'primary_domain' => ['required', 'string', 'max:253'],
             'runtime' => ['required', 'in:static,php,node,python,go,rust,bun,deno,docker,reverse_proxy'],
             'runtime_version' => ['required', 'string', 'max:32'],
+            'vhost_template' => ['nullable', 'in:generic-php,laravel,wordpress,nodejs,static,python,reverse-proxy'],
+            'app_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'host_port' => ['nullable', 'integer', 'min:1', 'max:65535'],
+            'install_command' => ['nullable', 'string', 'max:500'],
+            'build_command' => ['nullable', 'string', 'max:500'],
+            'start_command' => ['nullable', 'string', 'max:500'],
+            'document_root' => ['nullable', 'string', 'max:255'],
             'repository' => ['nullable', 'array'],
             'environment' => ['nullable', 'array'],
         ]);
@@ -45,17 +52,33 @@ final class SiteController
         $data = $request->validate([
             'name' => ['sometimes', 'string', 'max:120'],
             'runtime_version' => ['sometimes', 'string', 'max:32'],
+            'vhost_template' => ['sometimes', 'in:generic-php,laravel,wordpress,nodejs,static,python,reverse-proxy'],
+            'app_port' => ['sometimes', 'integer', 'min:1', 'max:65535'],
+            'host_port' => ['sometimes', 'integer', 'min:1', 'max:65535'],
+            'install_command' => ['sometimes', 'string', 'max:500'],
+            'build_command' => ['sometimes', 'string', 'max:500'],
+            'start_command' => ['sometimes', 'string', 'max:500'],
+            'document_root' => ['sometimes', 'string', 'max:255'],
             'environment' => ['sometimes', 'array'],
         ]);
         $current = DB::table('sites')->where('id', $site)->where('tenant_id', $request->user()->tenant_id)->firstOrFail();
         if (array_key_exists('environment', $data)) {
             $data['environment'] = json_encode($data['environment'], JSON_THROW_ON_ERROR);
         }
-        DB::table('sites')->where('id', $site)->where('tenant_id', $request->user()->tenant_id)->update($data + ['updated_at' => now()]);
+        $runtimeConfig = array_intersect_key($data, array_flip(['vhost_template', 'document_root', 'app_port', 'host_port', 'install_command', 'build_command', 'start_command']));
+        $dbData = array_intersect_key($data, array_flip(['name', 'runtime_version', 'environment']));
+        if ($runtimeConfig !== []) {
+            $existingRuntimeConfig = is_string($current->runtime_config ?? null) ? json_decode($current->runtime_config, true, 512, JSON_THROW_ON_ERROR) : [];
+            $dbData['runtime_config'] = json_encode(array_filter($runtimeConfig + $existingRuntimeConfig, fn (mixed $value): bool => $value !== null && $value !== ''), JSON_THROW_ON_ERROR);
+        }
+        if ($dbData !== []) {
+            DB::table('sites')->where('id', $site)->where('tenant_id', $request->user()->tenant_id)->update($dbData + ['updated_at' => now()]);
+        }
         $states->transition($request->user()->tenant_id, $site, SiteState::Updating, StateSource::Manual, 'manual:' . $site . ':update:' . hash('sha256', json_encode($data, JSON_THROW_ON_ERROR)), [
             'actor_id' => $request->user()->id,
         ]);
         $updated = (array) DB::table('sites')->where('id', $site)->where('tenant_id', $request->user()->tenant_id)->firstOrFail();
+        $updated = $updated + $runtimeConfig;
         $desiredStates->projectSite($site);
         $lifecycle->update($current->node_id, $site, $updated);
 

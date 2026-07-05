@@ -102,10 +102,17 @@ final class DriftResolver
                 'domain' => $desired['primary_domain'],
                 'domains' => $desired['domains'],
                 'quotas' => $desired['resource_limits'],
+                'runtime_config' => $desired['runtime_config'] ?? [],
+                'vhost_template' => $desired['runtime_config']['vhost_template'] ?? null,
+                'document_root' => $desired['runtime_config']['document_root'] ?? null,
+                'app_port' => $desired['runtime_config']['app_port'] ?? null,
+                'host_port' => $desired['runtime_config']['host_port'] ?? null,
+                'install_command' => $desired['runtime_config']['install_command'] ?? null,
+                'build_command' => $desired['runtime_config']['build_command'] ?? null,
+                'start_command' => $desired['runtime_config']['start_command'] ?? null,
                 'desired_container_config_hash' => $desired['container_config_hash'],
                 'desired_nginx_config_hash' => $desired['nginx_config_hash'],
             ],
         ], $commands);
     }
 }
-

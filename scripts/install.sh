@@ -8,6 +8,7 @@ PROJECT_NAME="${CONTROLPANEL_PROJECT_NAME:-controlpanel}"
 INSTALL_AGENT="${CONTROLPANEL_INSTALL_AGENT:-false}"
 AGENT_BIN="${CONTROLPANEL_AGENT_BIN:-/usr/local/bin/controlpanel-agent}"
 AGENT_CONFIG_DIR="${CONTROLPANEL_AGENT_CONFIG_DIR:-/etc/controlpanel}"
+AGENT_TEMPLATE_DIR="${CONTROLPANEL_AGENT_TEMPLATE_DIR:-/etc/controlpanel/vhost-templates}"
 YES="${CONTROLPANEL_YES:-false}"
 SKIP_START="${CONTROLPANEL_SKIP_START:-false}"
 GUIDED="${CONTROLPANEL_GUIDED:-false}"
@@ -69,6 +70,7 @@ Environment variables:
   CONTROLPANEL_SSL_DOMAIN
   CONTROLPANEL_AGENT_BIN
   CONTROLPANEL_AGENT_CONFIG_DIR
+  CONTROLPANEL_AGENT_TEMPLATE_DIR
   CONTROLPANEL_SKIP_START=true
   CONTROLPANEL_YES=true
 USAGE
@@ -446,6 +448,8 @@ install_agent_service() {
 
   if command -v systemctl >/dev/null 2>&1; then
     install -d -m 0750 "$AGENT_CONFIG_DIR"
+    install -d -m 0755 "$AGENT_TEMPLATE_DIR"
+    cp -f "$ROOT_DIR"/infra/nginx/vhost-templates/*.conf "$AGENT_TEMPLATE_DIR"/
     if [[ ! -f "$AGENT_CONFIG_DIR/agent.yaml" ]]; then
       cat >"$AGENT_CONFIG_DIR/agent.yaml" <<YAML
 node_id: replace-with-node-id
@@ -456,6 +460,7 @@ ca_cert_path: /etc/controlpanel/ca.pem
 client_cert_path: /etc/controlpanel/client.pem
 client_key_path: /etc/controlpanel/client-key.pem
 nginx_config_dir: /etc/nginx/conf.d/controlpanel
+nginx_template_dir: $AGENT_TEMPLATE_DIR
 site_data_dir: /var/lib/controlpanel/sites
 YAML
       chmod 0640 "$AGENT_CONFIG_DIR/agent.yaml"

@@ -16,6 +16,7 @@ final class DesiredStateProjector
         }
 
         $environment = $this->decode($site->environment ?? []);
+        $runtimeConfig = $this->decode($site->runtime_config ?? []);
         $quotas = $this->decode($site->quotas ?? []);
         $desired = [
             'site_id' => $siteId,
@@ -26,9 +27,10 @@ final class DesiredStateProjector
             'primary_domain' => $site->primary_domain,
             'domains' => $domains,
             'environment_hashes' => $this->hashEnvironment($environment),
+            'runtime_config' => $runtimeConfig,
             'resource_limits' => $quotas,
-            'container_config_hash' => $this->containerHash($site, $quotas, $environment),
-            'nginx_config_hash' => $this->nginxHash($site, $domains),
+            'container_config_hash' => $this->containerHash($site, $quotas, $environment, $runtimeConfig),
+            'nginx_config_hash' => $this->nginxHash($site, $domains, $runtimeConfig),
             'ssl_state' => DB::table('ssl_orders')->where('site_id', $siteId)->latest('created_at')->value('status') ?? 'pending',
             'status' => $site->status,
         ];
@@ -77,29 +79,35 @@ final class DesiredStateProjector
             ->all();
     }
 
-    private function containerHash(object $site, array $quotas, array $environment): string
+    private function containerHash(object $site, array $quotas, array $environment, array $runtimeConfig): string
     {
         ksort($quotas);
         ksort($environment);
+        ksort($runtimeConfig);
 
         return hash('sha256', json_encode([
             'runtime' => $site->runtime,
             'runtime_version' => $site->runtime_version,
             'quotas' => $quotas,
             'environment_hashes' => $this->hashEnvironment($environment),
+            'runtime_config' => $runtimeConfig,
         ], JSON_THROW_ON_ERROR));
     }
 
-    private function nginxHash(object $site, array $domains): string
+    private function nginxHash(object $site, array $domains, array $runtimeConfig): string
     {
         sort($domains);
+        ksort($runtimeConfig);
 
         return hash('sha256', json_encode([
             'primary_domain' => $site->primary_domain,
             'domains' => $domains,
             'runtime' => $site->runtime,
             'runtime_version' => $site->runtime_version,
+            'vhost_template' => $runtimeConfig['vhost_template'] ?? null,
+            'document_root' => $runtimeConfig['document_root'] ?? null,
+            'app_port' => $runtimeConfig['app_port'] ?? null,
+            'host_port' => $runtimeConfig['host_port'] ?? null,
         ], JSON_THROW_ON_ERROR));
     }
 }
-
