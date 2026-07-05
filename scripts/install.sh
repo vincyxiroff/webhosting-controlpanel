@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 COMPOSE_FILE="$ROOT_DIR/infra/docker-compose.yml"
 ENV_FILE="$ROOT_DIR/.env"
-PROJECT_NAME="${CONTROLPANEL_PROJECT_NAME:-controlpanel}"
+PROJECT_NAME="$(prompt_default 'Docker project name' "$PROJECT_NAME")"
 INSTALL_AGENT="${CONTROLPANEL_INSTALL_AGENT:-false}"
 AGENT_BIN="${CONTROLPANEL_AGENT_BIN:-/usr/local/bin/controlpanel-agent}"
 AGENT_CONFIG_DIR="${CONTROLPANEL_AGENT_CONFIG_DIR:-/etc/controlpanel}"
@@ -134,8 +134,15 @@ prompt_default() {
   local label="$1"
   local default="$2"
   local answer
-  printf '%s [%s]: ' "$label" "$default"
-  read -r answer
+
+  # Stampa il prompt sul terminale, non su stdout
+  printf '%s [%s]: ' "$label" "$default" >&2
+
+  if ! IFS= read -r answer; then
+    printf '%s' "$default"
+    return
+  fi
+
   printf '%s' "${answer:-$default}"
 }
 
@@ -144,11 +151,19 @@ prompt_yes_no() {
   local default="$2"
   local answer
   local hint="[y/N]"
+
   [[ "$default" == "true" ]] && hint="[Y/n]"
-  printf '%s %s ' "$label" "$hint"
-  read -r answer
+
+  printf '%s %s ' "$label" "$hint" >&2
+
+  if ! IFS= read -r answer; then
+    [[ "$default" == "true" ]]
+    return
+  fi
+
   answer="${answer:-$([[ "$default" == "true" ]] && printf y || printf n)}"
-  [[ "$answer" == "y" || "$answer" == "Y" ]]
+
+  [[ "$answer" =~ ^[Yy]$ ]]
 }
 
 url_scheme() {
@@ -187,7 +202,7 @@ run_guided_wizard() {
   [[ "$GUIDED" == "true" ]] || return 0
 
   printf '\nControlPanel OS guided installer\n'
-  printf '--------------------------------\n'
+  printf '%s\n' '--------------------------------'
   PROJECT_NAME="$(prompt_default 'Docker project name' "$PROJECT_NAME")"
   ENV_FILE="$(prompt_default 'Environment file path' "$ENV_FILE")"
   if [[ -f "$ENV_FILE" ]] && prompt_yes_no 'Env file exists. Regenerate it?' false; then
