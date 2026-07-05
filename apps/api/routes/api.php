@@ -15,7 +15,13 @@ use App\Http\Controllers\PlanController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\StabilityController;
 use App\Http\Controllers\TenantController;
+use App\Support\Cors;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
+
+Route::options('/{any}', function (Request $request) {
+    return Cors::apply(response('', 204), $request);
+})->where('any', '.*');
 
 Route::prefix('v1')->group(function (): void {
     Route::get('/auth/setup-status', [AuthController::class, 'setupStatus']);

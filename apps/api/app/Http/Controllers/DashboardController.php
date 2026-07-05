@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Domain\Auth\BearerTokenAuthenticator;
+use App\Support\Cors;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -15,7 +16,7 @@ final class DashboardController
         try {
             $user = $tokens->authenticate($request);
         } catch (RuntimeException $exception) {
-            return response()->json(['message' => $exception->getMessage()], 401);
+            return Cors::apply(response()->json(['message' => $exception->getMessage()], 401), $request);
         }
 
         $nodes = DB::table('nodes')->orderByDesc('updated_at')->limit(20)->get();
@@ -28,7 +29,7 @@ final class DashboardController
         $cpuSamples = $latestMetrics->map(fn (array $metrics): float => (float) ($metrics['cpu_percent'] ?? $metrics['cpu']['percent'] ?? 0));
         $memorySamples = $latestMetrics->map(fn (array $metrics): float => (float) ($metrics['memory_percent'] ?? $metrics['memory']['percent'] ?? 0));
 
-        return response()->json([
+        return Cors::apply(response()->json([
             'metrics' => [
                 'online_nodes' => DB::table('nodes')->where('status', 'online')->count(),
                 'total_nodes' => DB::table('nodes')->count(),
@@ -61,6 +62,6 @@ final class DashboardController
                 'node_id' => $site->node_id,
                 'runtime_config' => is_string($site->runtime_config ?? null) ? (json_decode($site->runtime_config, true) ?: []) : [],
             ])->values(),
-        ]);
+        ]), $request);
     }
 }

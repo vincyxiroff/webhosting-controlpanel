@@ -86,6 +86,7 @@ export default function Home() {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [apiReady, setApiReady] = useState(false);
 
   function saveSession(response: AuthResponse) {
     window.localStorage.setItem("controlpanel_access_token", response.access_token);
@@ -97,12 +98,14 @@ export default function Home() {
     setError(null);
     try {
       const setup = await api<SetupStatus>("/auth/setup-status");
+      setApiReady(true);
       setSetupStatus(setup);
       const existingToken = window.localStorage.getItem("controlpanel_access_token");
       if (!setup.setup_required && existingToken) {
         setAuthUser(await api<AuthUser>("/auth/me"));
       }
     } catch (exception) {
+      setApiReady(false);
       setError(exception instanceof Error ? exception.message : "Unable to check login state.");
     } finally {
       setLoading(false);
@@ -223,6 +226,31 @@ export default function Home() {
     { label: "Security events", value: String(overview.metrics.security_events), trend: "conflicts logged", icon: ShieldCheck },
     { label: "API source", value: process.env.NEXT_PUBLIC_API_URL?.replace(/^https?:\/\//, "") ?? "localhost", trend: loading ? "loading" : "live", icon: Lock }
   ], [overview, loading]);
+
+  if (!authUser && !apiReady && setupStatus === null) {
+    return (
+      <main className="grid min-h-screen place-items-center p-5">
+        <section className="w-full max-w-md rounded-md border border-border bg-panel p-5">
+          <div className="mb-5 flex items-center gap-3">
+            <div className="rounded-md border border-border p-2 text-danger">
+              <AlertCircle size={20} />
+            </div>
+            <div>
+              <h1 className="text-xl font-semibold">API unavailable</h1>
+              <p className="text-sm text-slate-600">{process.env.NEXT_PUBLIC_API_URL ?? "API URL missing"}</p>
+            </div>
+          </div>
+          <div className="rounded-md border border-danger/30 bg-red-50 p-3 text-sm text-danger">
+            {error ?? "Unable to reach the control-plane API."}
+          </div>
+          <button onClick={() => void checkSession()} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white">
+            <RefreshCcw size={16} />
+            Retry
+          </button>
+        </section>
+      </main>
+    );
+  }
 
   if (!authUser) {
     const setupRequired = setupStatus?.setup_required ?? false;

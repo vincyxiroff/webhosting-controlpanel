@@ -21,6 +21,7 @@ $required = @(
   "apps/api/app/Http/Controllers/PanelController.php",
   "apps/api/app/Http/Controllers/FossBillingServerController.php",
   "apps/api/app/Domain/Auth/BearerTokenAuthenticator.php",
+  "apps/api/app/Support/Cors.php",
   "apps/api/database/migrations/0001_01_01_000000_create_controlpanel_schema.php",
   "apps/api/database/migrations/0001_01_01_000001_create_enterprise_control_layers.php",
   "apps/api/database/migrations/0001_01_01_000002_create_agent_command_contract.php",

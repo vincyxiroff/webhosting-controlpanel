@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Domain\Auth\AuthService;
 use App\Domain\Auth\BearerTokenAuthenticator;
+use App\Support\Cors;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,18 +23,18 @@ final class AuthController
         ]);
 
         try {
-            return response()->json($auth->login($data['email'], $data['password'], $data['totp'] ?? null, $request->ip()));
+            return Cors::apply(response()->json($auth->login($data['email'], $data['password'], $data['totp'] ?? null, $request->ip())), $request);
         } catch (RuntimeException $exception) {
-            return response()->json(['message' => $exception->getMessage()], 401);
+            return Cors::apply(response()->json(['message' => $exception->getMessage()], 401), $request);
         }
     }
 
-    public function setupStatus(): JsonResponse
+    public function setupStatus(Request $request): JsonResponse
     {
-        return response()->json([
+        return Cors::apply(response()->json([
             'setup_required' => DB::table('users')->whereIn('role', ['owner', 'admin'])->doesntExist(),
             'setup_token_required' => env('CONTROLPANEL_SETUP_TOKEN') !== null && env('CONTROLPANEL_SETUP_TOKEN') !== '',
-        ]);
+        ]), $request);
     }
 
     public function setup(Request $request, AuthService $auth): JsonResponse
@@ -74,7 +75,7 @@ final class AuthController
             'updated_at' => now(),
         ]);
 
-        return response()->json($auth->login($data['email'], $data['password'], null, $request->ip()), 201);
+        return Cors::apply(response()->json($auth->login($data['email'], $data['password'], null, $request->ip()), 201), $request);
     }
 
     public function me(Request $request, BearerTokenAuthenticator $tokens): JsonResponse
@@ -82,14 +83,14 @@ final class AuthController
         try {
             $user = $tokens->authenticate($request);
         } catch (RuntimeException $exception) {
-            return response()->json(['message' => $exception->getMessage()], 401);
+            return Cors::apply(response()->json(['message' => $exception->getMessage()], 401), $request);
         }
 
-        return response()->json([
+        return Cors::apply(response()->json([
             'id' => $user->id,
             'tenant_id' => $user->tenant_id,
             'email' => $user->email,
             'role' => $user->role,
-        ]);
+        ]), $request);
     }
 }
