@@ -108,8 +108,14 @@ prompt_default() {
   local label="$1"
   local default="$2"
   local answer
-  printf '%s [%s]: ' "$label" "$default"
-  read -r answer
+
+  printf '%s [%s]: ' "$label" "$default" >&2
+
+  if ! IFS= read -r answer; then
+    printf '%s' "$default"
+    return
+  fi
+
   printf '%s' "${answer:-$default}"
 }
 
@@ -119,17 +125,23 @@ prompt_yes_no() {
   local answer
   local hint="[y/N]"
   [[ "$default" == "true" ]] && hint="[Y/n]"
-  printf '%s %s ' "$label" "$hint"
-  read -r answer
+  printf '%s %s ' "$label" "$hint" >&2
+
+  if ! IFS= read -r answer; then
+    [[ "$default" == "true" ]]
+    return
+  fi
+
   answer="${answer:-$([[ "$default" == "true" ]] && printf y || printf n)}"
-  [[ "$answer" == "y" || "$answer" == "Y" ]]
+
+  [[ "$answer" =~ ^[Yy]$ ]]
 }
 
 run_guided_wizard() {
   [[ "$GUIDED" == "true" ]] || return 0
 
   printf '\nControlPanel OS guided uninstaller\n'
-  printf '----------------------------------\n'
+  printf '%s\n' '----------------------------------'
   PROJECT_NAME="$(prompt_default 'Docker project name' "$PROJECT_NAME")"
   ENV_FILE="$(prompt_default 'Environment file path' "$ENV_FILE")"
 

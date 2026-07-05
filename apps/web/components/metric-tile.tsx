@@ -23,4 +23,3 @@ export function MetricTile({ label, value, trend, icon: Icon }: MetricTileProps)
     </article>
   );
 }
-

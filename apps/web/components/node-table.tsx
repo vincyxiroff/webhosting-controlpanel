@@ -1,11 +1,26 @@
-const nodes = [
-  { name: "web-fra-01", region: "fra", role: "web", cpu: "38%", memory: "44%", status: "online" },
-  { name: "web-nyc-02", region: "nyc", role: "web", cpu: "52%", memory: "59%", status: "online" },
-  { name: "db-fra-01", region: "fra", role: "db", cpu: "31%", memory: "68%", status: "online" },
-  { name: "edge-sfo-01", region: "sfo", role: "edge", cpu: "24%", memory: "36%", status: "draining" }
-];
+import type { DashboardOverview } from "@/lib/api";
 
-export function NodeTable() {
+type NodeTableProps = {
+  nodes: DashboardOverview["nodes"];
+};
+
+function metricPercent(metrics: Record<string, unknown>, primary: string, nested: string): string {
+  const direct = metrics[primary];
+  if (typeof direct === "number") {
+    return `${Math.round(direct)}%`;
+  }
+  const nestedValue = metrics[nested];
+  if (nestedValue && typeof nestedValue === "object" && "percent" in nestedValue) {
+    const percent = (nestedValue as { percent?: unknown }).percent;
+    if (typeof percent === "number") {
+      return `${Math.round(percent)}%`;
+    }
+  }
+
+  return "-";
+}
+
+export function NodeTable({ nodes }: NodeTableProps) {
   return (
     <section className="rounded-md border border-border bg-panel">
       <div className="border-b border-border px-4 py-3">
@@ -25,21 +40,25 @@ export function NodeTable() {
           </thead>
           <tbody>
             {nodes.map((node) => (
-              <tr key={node.name} className="border-t border-border">
+              <tr key={node.id} className="border-t border-border">
                 <td className="px-4 py-3 font-medium">{node.name}</td>
                 <td className="px-4 py-3">{node.region}</td>
-                <td className="px-4 py-3">{node.role}</td>
-                <td className="px-4 py-3">{node.cpu}</td>
-                <td className="px-4 py-3">{node.memory}</td>
+                <td className="px-4 py-3">{node.roles.join(", ") || "-"}</td>
+                <td className="px-4 py-3">{metricPercent(node.metrics, "cpu_percent", "cpu")}</td>
+                <td className="px-4 py-3">{metricPercent(node.metrics, "memory_percent", "memory")}</td>
                 <td className="px-4 py-3">
                   <span className="rounded-full bg-slate-100 px-2 py-1 text-xs">{node.status}</span>
                 </td>
               </tr>
             ))}
+            {nodes.length === 0 && (
+              <tr className="border-t border-border">
+                <td className="px-4 py-6 text-slate-600" colSpan={6}>No nodes registered yet.</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
     </section>
   );
 }
-

@@ -17,6 +17,10 @@ $required = @(
   "apps/api/composer.json",
   "apps/api/routes/api.php",
   "apps/api/app/Http/Controllers/EnterpriseController.php",
+  "apps/api/app/Http/Controllers/DashboardController.php",
+  "apps/api/app/Http/Controllers/PanelController.php",
+  "apps/api/app/Http/Controllers/FossBillingServerController.php",
+  "apps/api/app/Domain/Auth/BearerTokenAuthenticator.php",
   "apps/api/database/migrations/0001_01_01_000000_create_controlpanel_schema.php",
   "apps/api/database/migrations/0001_01_01_000001_create_enterprise_control_layers.php",
   "apps/api/database/migrations/0001_01_01_000002_create_agent_command_contract.php",
@@ -68,9 +72,11 @@ $required = @(
   "apps/api/app/Http/Controllers/OperationJournalController.php",
   "apps/api/app/Domain/Conflicts/ConflictResolver.php",
   "scripts/install.sh",
+  "scripts/set-public-url.sh",
   "scripts/uninstall.sh",
   "scripts/install.ps1",
-  "scripts/uninstall.ps1"
+  "scripts/uninstall.ps1",
+  "integrations/fossbilling/Server/Manager/ControlPanelOS.php"
 )
 
 foreach ($file in $required) {

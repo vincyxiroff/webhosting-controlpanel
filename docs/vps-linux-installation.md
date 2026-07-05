@@ -179,6 +179,33 @@ sudo ./scripts/install.sh --yes --enable-ssl --ssl-domain panel.example.com --ss
 docker compose -p controlpanel -f infra/docker-compose.yml --env-file .env up -d --build
 ```
 
+If you installed with the wrong URL, do not edit `.env` with plain `sed` if the file was created by `sudo`. Use:
+
+```bash
+sudo ./scripts/set-public-url.sh http://92.5.152.65:8080
+docker compose -p controlpanel -f infra/docker-compose.yml --env-file .env up -d --build
+```
+
+On first login open the dashboard and create the first admin account. If the installer generated a setup token, read it with:
+
+```bash
+sudo grep '^CONTROLPANEL_SETUP_TOKEN=' .env
+```
+
+For FOSSBilling, use `FOSSBILLING_SERVER_API_KEY` as the server manager API key.
+
+For the dashboard on port `3001`, keep the API URL pointed to the API port:
+
+```bash
+sudo ./scripts/set-public-url.sh http://92.5.152.65:8080
+```
+
+Then browse:
+
+```text
+http://92.5.152.65:3001
+```
+
 Check status:
 
 ```bash

@@ -21,6 +21,8 @@ This repository is a production-oriented foundation, not a toy mockup. It define
 - `docs/final-stability-layer.md` - Canonical state machine, Redis locks, ordered tenant events, priorities, and conflict handling.
 - `docs/operation-journal.md` - Lightweight event sourcing, operation timelines, snapshots, rollback causation, and audit model.
 - `docs/vps-linux-installation.md` - Complete VPS Linux install, node-agent setup, verification, upgrade, and uninstall guide.
+- `docs/nodejs-hosting.md` - Node.js hosting model, app port, install/build/start commands, and NGINX routing.
+- `infra/nginx/vhost-templates` - Local NGINX vhost presets adapted from common CloudPanel-style hosting templates.
 
 ## Local Start
 
@@ -50,6 +52,13 @@ docker compose -p controlpanel -f infra/docker-compose.yml exec api php artisan 
 
 If the guided URL is `https://panel.example.com`, the installer can configure host NGINX and Let's Encrypt automatically. Use a DNS name already pointing to the VPS; raw IP addresses cannot receive Let's Encrypt certificates.
 
+If the public IP/URL was entered wrong:
+
+```bash
+sudo ./scripts/set-public-url.sh http://SERVER_IP:8080
+docker compose -p controlpanel -f infra/docker-compose.yml --env-file .env up -d --build
+```
+
 For a node VPS:
 
 ```bash
@@ -59,6 +68,24 @@ sudo systemctl enable --now controlpanel-agent
 ```
 
 Read the full guide: `docs/vps-linux-installation.md`.
+
+## FOSSBilling Server Manager
+
+Copy the manager into your FOSSBilling installation:
+
+```bash
+sudo cp integrations/fossbilling/Server/Manager/ControlPanelOS.php /path/to/fossbilling/src/library/Server/Manager/ControlPanelOS.php
+```
+
+Then create a FOSSBilling server with:
+
+- Manager: `ControlPanelOS`
+- Host: your panel host or VPS IP
+- Port: `8080` unless the API is behind HTTPS on `443`
+- Secure: enabled only when using HTTPS
+- API key: value of `FOSSBILLING_SERVER_API_KEY` from `.env`
+
+The manager implements the current `Server_Manager` contract: create, suspend, unsuspend, cancel, synchronize, change password, and change package.
 
 ## Installer
 

@@ -134,15 +134,8 @@ prompt_default() {
   local label="$1"
   local default="$2"
   local answer
-
-  # Stampa il prompt sul terminale, non su stdout
-  printf '%s [%s]: ' "$label" "$default" >&2
-
-  if ! IFS= read -r answer; then
-    printf '%s' "$default"
-    return
-  fi
-
+  printf '%s [%s]: ' "$label" "$default"
+  read -r answer
   printf '%s' "${answer:-$default}"
 }
 
@@ -153,14 +146,8 @@ prompt_yes_no() {
   local hint="[y/N]"
 
   [[ "$default" == "true" ]] && hint="[Y/n]"
-
-  printf '%s %s ' "$label" "$hint" >&2
-
-  if ! IFS= read -r answer; then
-    [[ "$default" == "true" ]]
-    return
-  fi
-
+  printf '%s %s ' "$label" "$hint"
+  read -r answer
   answer="${answer:-$([[ "$default" == "true" ]] && printf y || printf n)}"
 
   [[ "$answer" =~ ^[Yy]$ ]]
@@ -293,18 +280,21 @@ write_env() {
   local db_password
   local pdns_key
   local fossbilling_secret
+  local fossbilling_server_key
+  local setup_token
   app_key="base64:$(generate_secret)"
   db_password="$(generate_secret | tr -dc 'A-Za-z0-9' | head -c 32)"
   pdns_key="$(generate_secret | tr -dc 'A-Za-z0-9' | head -c 32)"
   fossbilling_secret="$(generate_secret | tr -dc 'A-Za-z0-9' | head -c 48)"
+  fossbilling_server_key="$(generate_secret | tr -dc 'A-Za-z0-9' | head -c 48)"
+  setup_token="$(generate_secret | tr -dc 'A-Za-z0-9' | head -c 32)"
   local next_api_url
   local next_ws_url
+  next_api_url="${APP_URL%/}/v1"
   if [[ "$(url_scheme "$APP_URL")" == "https" ]]; then
-    next_api_url="${APP_URL%/}/v1"
     next_ws_url="wss://$(url_host "$APP_URL")/app"
   else
-    next_api_url="http://localhost:$API_PORT/v1"
-    next_ws_url="ws://localhost:8081"
+    next_ws_url="ws://$(url_host "$APP_URL")/app"
   fi
 
   umask 077
@@ -331,6 +321,8 @@ POSTGRES_PASSWORD=$db_password
 
 PDNS_AUTH_API_KEY=$pdns_key
 FOSSBILLING_WEBHOOK_SECRET=$fossbilling_secret
+FOSSBILLING_SERVER_API_KEY=$fossbilling_server_key
+CONTROLPANEL_SETUP_TOKEN=$setup_token
 
 NEXT_PUBLIC_API_URL=$next_api_url
 NEXT_PUBLIC_WS_URL=$next_ws_url
@@ -344,6 +336,10 @@ POWERDNS_API_PORT=$POWERDNS_API_PORT
 CONTROLPANEL_ENABLE_SSL=$ENABLE_SSL
 CONTROLPANEL_SSL_DOMAIN=$SSL_DOMAIN
 ENV
+  if [[ -n "${SUDO_USER:-}" && "${SUDO_USER:-}" != "root" ]] && command -v chown >/dev/null 2>&1; then
+    chown "$SUDO_USER":"$SUDO_USER" "$ENV_FILE" >/dev/null 2>&1 || true
+  fi
+  chmod 0640 "$ENV_FILE" >/dev/null 2>&1 || true
   log "Created .env with generated secrets"
 }
 
